@@ -1,6 +1,16 @@
 const { createClient } = require("@supabase/supabase-js");
 
 /* -------------------------------------------------- */
+/* CORS                                               */
+/* -------------------------------------------------- */
+
+const setCors = (res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+};
+
+/* -------------------------------------------------- */
 /* SUPABASE CLIENT                                    */
 /* -------------------------------------------------- */
 
@@ -13,8 +23,8 @@ const SUPABASE_PUBLIC_BASE =
   `${process.env.SUPABASE_URL}/storage/v1/object/public/scenes-media/`;
 
 const toPublicUrl = (path) => {
-  if (!path) return null;
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  if (!path || typeof path !== "string") return null;
+  if (path.startsWith("http")) return path;
   return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
 };
 
@@ -23,15 +33,12 @@ const toPublicUrl = (path) => {
 /* -------------------------------------------------- */
 
 function weightedPick(items) {
-  if (!items || items.length === 0) return null;
-
+  if (!items || !items.length) return null;
   const total = items.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
-
   for (const item of items) {
     if ((r -= item.weight) <= 0) return item;
   }
-
   return items[items.length - 1];
 }
 
@@ -40,12 +47,9 @@ function weightedPick(items) {
 /* -------------------------------------------------- */
 
 module.exports = async function handler(req, res) {
+  setCors(res);
 
-  /* ---------- CORS (CRITIQUE) ---------- */
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
+  // 🔴 Preflight
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -78,12 +82,13 @@ module.exports = async function handler(req, res) {
 
     for (const row of emojiMedia || []) {
       if (!emojis.includes(row.emoji)) continue;
-      if (!emojiIndex[row.media_path]) emojiIndex[row.media_path] = 0;
+      if (!row.media_path) continue;
+      emojiIndex[row.media_path] ??= 0;
       emojiIndex[row.media_path] += row.intensity || 1;
     }
 
     const scored = (semantics || [])
-      .filter((m) => emojiIndex[m.path])
+      .filter((m) => m.path && emojiIndex[m.path])
       .map((m) => ({
         ...m,
         weight: emojiIndex[m.path] + Math.random()
@@ -100,11 +105,7 @@ module.exports = async function handler(req, res) {
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
-    const voices = scored
-      .filter((m) => m.category === "voice")
-      .slice(0, 3);
-
-    const seed = Date.now();
+    const voices = scored.filter((m) => m.category === "voice").slice(0, 3);
 
     /* -------------------------------------------------- */
     /* RESPONSE                                           */
@@ -112,7 +113,7 @@ module.exports = async function handler(req, res) {
 
     res.status(200).json({
       id: `scene-${Math.random().toString(16).slice(2)}`,
-      seed,
+      seed: Date.now(),
       emojis,
       intensity: Math.random(),
       media: {
@@ -120,7 +121,7 @@ module.exports = async function handler(req, res) {
         video: toPublicUrl(video?.path),
         shader: toPublicUrl(shader?.path),
         text: toPublicUrl(text?.path),
-        voices: voices.map(v => toPublicUrl(v.path))
+        voices: voices.map(v => toPublicUrl(v.path)).filter(Boolean)
       },
       oracle: {
         text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`
