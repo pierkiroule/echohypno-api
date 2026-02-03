@@ -4,6 +4,6 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
   res.status(200).json({
     ok: true,
     service: "echohypno-api",
-    time: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
   });
 }
