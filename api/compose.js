@@ -1,11 +1,27 @@
 const { createClient } = require("@supabase/supabase-js");
 
+/* -------------------------------------------------- */
+/* SUPABASE CLIENT                                    */
+/* -------------------------------------------------- */
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// tirage pondéré simple
+const SUPABASE_PUBLIC_BASE =
+  `${process.env.SUPABASE_URL}/storage/v1/object/public/scenes-media/`;
+
+const toPublicUrl = (path) => {
+  if (!path) return null;
+  if (path.startsWith("http")) return path;
+  return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
+};
+
+/* -------------------------------------------------- */
+/* UTILS                                              */
+/* -------------------------------------------------- */
+
 function weightedPick(items) {
   if (!items.length) return null;
   const total = items.reduce((s, i) => s + i.weight, 0);
@@ -16,6 +32,10 @@ function weightedPick(items) {
   return items[items.length - 1];
 }
 
+/* -------------------------------------------------- */
+/* API HANDLER                                        */
+/* -------------------------------------------------- */
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST only" });
@@ -23,43 +43,57 @@ module.exports = async function handler(req, res) {
 
   try {
     const { emojis = [] } = req.body;
+
     if (!Array.isArray(emojis) || emojis.length === 0) {
       return res.status(400).json({ error: "emojis required" });
     }
 
-    // 1. charger tables
+    /* -------------------------------------------------- */
+    /* LOAD DATA                                          */
+    /* -------------------------------------------------- */
+
     const [{ data: semantics }, { data: emojiMedia }] = await Promise.all([
       supabase.from("media_semantics").select("*").eq("enabled", true),
       supabase.from("emoji_media").select("*").eq("enabled", true)
     ]);
 
-    // index emoji → médias
+    /* -------------------------------------------------- */
+    /* SCORE MEDIA BY EMOJI                               */
+    /* -------------------------------------------------- */
+
     const emojiIndex = {};
-    for (const row of emojiMedia) {
+
+    for (const row of emojiMedia || []) {
       if (!emojis.includes(row.emoji)) continue;
       if (!emojiIndex[row.media_path]) emojiIndex[row.media_path] = 0;
       emojiIndex[row.media_path] += row.intensity || 1;
     }
 
-    // fusion + score
-    const scored = semantics
-      .filter(m => emojiIndex[m.path])
-      .map(m => ({
+    const scored = (semantics || [])
+      .filter((m) => emojiIndex[m.path])
+      .map((m) => ({
         ...m,
         weight: emojiIndex[m.path] + Math.random()
       }));
 
-    // helper par catégorie
     const pickCategory = (category) =>
-      weightedPick(scored.filter(m => m.category === category));
+      weightedPick(scored.filter((m) => m.category === category));
+
+    /* -------------------------------------------------- */
+    /* PICKS                                              */
+    /* -------------------------------------------------- */
 
     const music = pickCategory("music");
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
-    const voices = scored.filter(m => m.category === "voice").slice(0, 2);
+    const voices = scored.filter((m) => m.category === "voice").slice(0, 3);
 
     const seed = Date.now();
+
+    /* -------------------------------------------------- */
+    /* RESPONSE                                           */
+    /* -------------------------------------------------- */
 
     res.status(200).json({
       id: `scene-${Math.random().toString(16).slice(2)}`,
@@ -67,11 +101,11 @@ module.exports = async function handler(req, res) {
       emojis,
       intensity: Math.random(),
       media: {
-        music: music?.path || null,
-        video: video?.path || null,
-        shader: shader?.path || null,
-        text: text?.path || null,
-        voices: voices.map(v => v.path)
+        music: toPublicUrl(music?.path),
+        video: toPublicUrl(video?.path),
+        shader: toPublicUrl(shader?.path),
+        text: toPublicUrl(text?.path),
+        voices: voices.map((v) => toPublicUrl(v.path))
       },
       oracle: {
         text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`
@@ -79,7 +113,7 @@ module.exports = async function handler(req, res) {
     });
 
   } catch (e) {
-    console.error(e);
+    console.error("[compose error]", e);
     res.status(500).json({ error: "compose failed" });
   }
 };
