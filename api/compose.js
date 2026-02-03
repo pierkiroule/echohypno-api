@@ -22,16 +22,20 @@ const supabase = createClient(
 const SUPABASE_PUBLIC_BASE =
   `${process.env.SUPABASE_URL}/storage/v1/object/public/scenes-media/`;
 
-const toPublicUrl = (path) => {
-  if (!path) return null;
-  if (typeof path !== "string") return null;
-  if (path.startsWith("http")) return path;
-  return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
-};
-
 /* -------------------------------------------------- */
 /* UTILS                                              */
 /* -------------------------------------------------- */
+
+const normalizeEmoji = (e) =>
+  typeof e === "string"
+    ? e.trim().replace(/\uFE0F/g, "")
+    : "";
+
+const toPublicUrl = (path) => {
+  if (!path || typeof path !== "string") return null;
+  if (path.startsWith("http")) return path;
+  return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
+};
 
 function weightedPick(items) {
   if (!Array.isArray(items) || items.length === 0) return null;
@@ -72,6 +76,8 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "emojis required" });
     }
 
+    const normalizedEmojis = emojis.map(normalizeEmoji);
+
     /* ---------- Load data ---------- */
     const [{ data: semantics }, { data: emojiMedia }] = await Promise.all([
       supabase.from("media_semantics").select("*").eq("enabled", true),
@@ -82,7 +88,7 @@ module.exports = async function handler(req, res) {
     const emojiIndex = {};
 
     for (const row of emojiMedia || []) {
-      if (!emojis.includes(row.emoji)) continue;
+      if (!normalizedEmojis.includes(normalizeEmoji(row.emoji))) continue;
       if (!emojiIndex[row.media_path]) emojiIndex[row.media_path] = 0;
       emojiIndex[row.media_path] += row.intensity || 1;
     }
@@ -94,15 +100,21 @@ module.exports = async function handler(req, res) {
         weight: emojiIndex[m.path] + Math.random()
       }));
 
+    /* ---------- Fallback sécurité ---------- */
+    const usable =
+      scored.length > 0
+        ? scored
+        : (semantics || []).map((m) => ({ ...m, weight: 1 }));
+
     const pickCategory = (category) =>
-      weightedPick(scored.filter((m) => m.category === category));
+      weightedPick(usable.filter((m) => m.category === category));
 
     /* ---------- Picks ---------- */
     const music = pickCategory("music");
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
-    const voices = scored
+    const voices = usable
       .filter((m) => m.category === "voice")
       .slice(0, 3);
 
