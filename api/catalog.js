@@ -7,18 +7,34 @@ const supabase = createClient(
 
 module.exports = async function handler(req, res) {
   try {
-    const { data, error } = await supabase
-      .storage
-      .from("scenes-media")
-      .list("", { limit: 100 });
+    // 1. Bucket
+    const { data: bucket, error: bucketError } =
+      await supabase.storage.from("scenes-media").list("", { limit: 100 });
 
-    if (error) throw error;
+    if (bucketError) throw bucketError;
+
+    // 2. Tables
+    const { data: mediaSemantics, error: semError } =
+      await supabase.from("media_semantics").select("*");
+
+    if (semError) throw semError;
+
+    const { data: emojiMedia, error: emojiError } =
+      await supabase.from("emoji_media").select("*");
+
+    if (emojiError) throw emojiError;
 
     res.status(200).json({
       ok: true,
-      bucket: "scenes-media",
-      files: data.map(f => f.name)
+      bucket: bucket.map(f => f.name),
+      counts: {
+        media_semantics: mediaSemantics.length,
+        emoji_media: emojiMedia.length
+      },
+      media_semantics: mediaSemantics,
+      emoji_media: emojiMedia
     });
+
   } catch (e) {
     res.status(500).json({
       ok: false,
