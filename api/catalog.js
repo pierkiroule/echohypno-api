@@ -1,5 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("Missing Supabase env vars");
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -26,26 +30,23 @@ export default async function handler(req, res) {
         .list(folder, { limit: 1000 });
 
       if (error) {
-        console.error("[catalog]", category, error.message);
         result[category] = [];
         continue;
       }
 
-      result[category] = (data ?? [])
-        .filter(f => f.name)
-        .map(f => f.name);
+      result[category] = (data ?? []).map(f => f.name);
     }
 
     res.status(200).json({
+      ok: true,
       bucket: BUCKET,
-      counts: Object.fromEntries(
-        Object.entries(result).map(([k, v]) => [k, v.length])
-      ),
       media: result
     });
 
   } catch (err) {
-    console.error("CATALOG_ERROR", err);
-    res.status(500).json({ error: "catalog_failed" });
+    res.status(500).json({
+      ok: false,
+      error: err.message
+    });
   }
 }
