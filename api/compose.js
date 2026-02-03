@@ -93,17 +93,10 @@ module.exports = async function handler(req, res) {
       emojiIndex[row.media_path] += row.intensity || 1;
     }
 
-    const scored = (semantics || []).map((m) => {
-  const emojiWeight = emojiIndex[m.path] || 0;
-
-  return {
-    ...m,
-    // base 1 = tous les médias restent candidats
-    // emojiWeight = influence symbolique
-    // Math.random() = variation vivante
-    weight: 1 + emojiWeight * 2 + Math.random()
-  };
-});
+    const scored = (semantics || []).map((m) => ({
+  ...m,
+  weight: (emojiIndex[m.path] || 1) + Math.random()
+}));
 
     /* ---------- Fallback sécurité ---------- */
     const usable =
