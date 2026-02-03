@@ -14,7 +14,7 @@ const SUPABASE_PUBLIC_BASE =
 
 const toPublicUrl = (path) => {
   if (!path) return null;
-  if (path.startsWith("http")) return path;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
 };
 
@@ -23,12 +23,15 @@ const toPublicUrl = (path) => {
 /* -------------------------------------------------- */
 
 function weightedPick(items) {
-  if (!items.length) return null;
+  if (!items || items.length === 0) return null;
+
   const total = items.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
+
   for (const item of items) {
     if ((r -= item.weight) <= 0) return item;
   }
+
   return items[items.length - 1];
 }
 
@@ -37,12 +40,22 @@ function weightedPick(items) {
 /* -------------------------------------------------- */
 
 module.exports = async function handler(req, res) {
+
+  /* ---------- CORS (CRITIQUE) ---------- */
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "POST only" });
   }
 
   try {
-    const { emojis = [] } = req.body;
+    const { emojis = [] } = req.body || {};
 
     if (!Array.isArray(emojis) || emojis.length === 0) {
       return res.status(400).json({ error: "emojis required" });
@@ -87,7 +100,9 @@ module.exports = async function handler(req, res) {
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
-    const voices = scored.filter((m) => m.category === "voice").slice(0, 3);
+    const voices = scored
+      .filter((m) => m.category === "voice")
+      .slice(0, 3);
 
     const seed = Date.now();
 
@@ -105,7 +120,7 @@ module.exports = async function handler(req, res) {
         video: toPublicUrl(video?.path),
         shader: toPublicUrl(shader?.path),
         text: toPublicUrl(text?.path),
-        voices: voices.map((v) => toPublicUrl(v.path))
+        voices: voices.map(v => toPublicUrl(v.path))
       },
       oracle: {
         text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`
