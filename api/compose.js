@@ -124,11 +124,41 @@ module.exports = async function handler(req, res) {
     const voices = usable
       .filter((m) => m.category === "voice")
       .sort(() => Math.random() - 0.5)
-      .slice(0, 6); // ← narration étalée
+      .slice(0, 6);
 
     /* ---------- Intensity globale ---------- */
     const baseIntensity =
       normalizedEmojis.length / 3 + Math.random() * 0.25;
+
+    /* ---------- TRACE COLLECTIVE (light) ---------- */
+    for (const e of normalizedEmojis) {
+      await supabase
+        .from("emoji_collective_stats")
+        .upsert(
+          {
+            emoji: e,
+            occurrences: 1,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: "emoji" }
+        );
+    }
+
+    for (let i = 0; i < normalizedEmojis.length; i++) {
+      for (let j = i + 1; j < normalizedEmojis.length; j++) {
+        await supabase
+          .from("emoji_cooccurrences")
+          .upsert(
+            {
+              emoji_source: normalizedEmojis[i],
+              emoji_target: normalizedEmojis[j],
+              occurrences: 1,
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: "emoji_source,emoji_target" }
+          );
+      }
+    }
 
     /* ---------- Response ---------- */
     res.status(200).json({
