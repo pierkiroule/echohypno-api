@@ -39,10 +39,11 @@ const toPublicUrl = (path) => {
 
 function weightedPick(items) {
   if (!Array.isArray(items) || items.length === 0) return null;
-  const total = items.reduce((s, i) => s + i.weight, 0);
+  const total = items.reduce((s, i) => s + (i.weight || 1), 0);
   let r = Math.random() * total;
   for (const item of items) {
-    if ((r -= item.weight) <= 0) return item;
+    r -= item.weight || 1;
+    if (r <= 0) return item;
   }
   return items[items.length - 1];
 }
@@ -54,7 +55,6 @@ function weightedPick(items) {
 module.exports = async function handler(req, res) {
   setCors(res);
 
-  /* ---------- Preflight ---------- */
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -64,7 +64,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    /* ---------- Safe body parsing ---------- */
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body)
@@ -84,25 +83,24 @@ module.exports = async function handler(req, res) {
       supabase.from("emoji_media").select("*").eq("enabled", true)
     ]);
 
-    /* ---------- Score by emoji ---------- */
+    /* ---------- Build emoji index ---------- */
     const emojiIndex = {};
 
     for (const row of emojiMedia || []) {
       if (!normalizedEmojis.includes(normalizeEmoji(row.emoji))) continue;
-      if (!emojiIndex[row.media_path]) emojiIndex[row.media_path] = 0;
-      emojiIndex[row.media_path] += row.intensity || 1;
+      emojiIndex[row.media_path] =
+        (emojiIndex[row.media_path] || 0) + (row.intensity || 1);
     }
 
+    /* ---------- Score media ---------- */
     const scored = (semantics || []).map((m) => ({
-  ...m,
-  weight: (emojiIndex[m.path] || 1) + Math.random()
-}));
+      ...m,
+      weight: (emojiIndex[m.path] || 1) + Math.random() * 0.5
+    }));
 
-    /* ---------- Fallback sécurité ---------- */
-    const usable =
-      scored.length > 0
-        ? scored
-        : (semantics || []).map((m) => ({ ...m, weight: 1 }));
+    const usable = scored.length
+      ? scored
+      : (semantics || []).map((m) => ({ ...m, weight: 1 }));
 
     const pickCategory = (category) =>
       weightedPick(usable.filter((m) => m.category === category));
@@ -112,16 +110,22 @@ module.exports = async function handler(req, res) {
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
+
     const voices = usable
       .filter((m) => m.category === "voice")
+      .sort(() => Math.random() - 0.5)
       .slice(0, 3);
+
+    /* ---------- Intensity liée aux emojis ---------- */
+    const baseIntensity =
+      normalizedEmojis.length / 3 + Math.random() * 0.3;
 
     /* ---------- Response ---------- */
     res.status(200).json({
       id: `scene-${Math.random().toString(16).slice(2)}`,
       seed: Date.now(),
       emojis,
-      intensity: Math.random(),
+      intensity: Math.min(1, baseIntensity),
       media: {
         music: toPublicUrl(music?.path),
         video: toPublicUrl(video?.path),
