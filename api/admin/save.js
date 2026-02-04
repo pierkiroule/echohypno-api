@@ -6,7 +6,10 @@ const { createClient } = require("@supabase/supabase-js");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: { persistSession: false }
+  }
 );
 
 /* -------------------------------------------------- */
@@ -26,6 +29,7 @@ function setCors(res) {
 module.exports = async function handler(req, res) {
   setCors(res);
 
+  /* ---------- Preflight ---------- */
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -35,10 +39,11 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    /* ---------- Body parsing sûr ---------- */
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body)
-        : req.body || {};
+        : req.body ?? {};
 
     const { rows } = body;
 
@@ -48,32 +53,49 @@ module.exports = async function handler(req, res) {
 
     let updated = 0;
 
+    /* ---------- Update ligne par ligne (RLS safe) ---------- */
     for (const r of rows) {
+      if (
+        !r ||
+        typeof r.emoji !== "string" ||
+        typeof r.media_path !== "string" ||
+        typeof r.role !== "string"
+      ) {
+        continue;
+      }
+
       const { error } = await supabase
         .from("emoji_media")
         .update({
-          intensity: r.intensity,
-          enabled: r.enabled
+          intensity: Number(r.intensity) || 0,
+          enabled: Boolean(r.enabled)
         })
         .eq("emoji", r.emoji)
         .eq("media_path", r.media_path)
         .eq("role", r.role);
 
       if (error) {
-        console.error("[admin save error]", error);
+        console.error("[admin save row error]", {
+          row: r,
+          error: error.message
+        });
         throw error;
       }
 
       updated++;
     }
 
-    res.status(200).json({
+    /* ---------- OK ---------- */
+    return res.status(200).json({
       ok: true,
       updated
     });
 
-  } catch (e) {
-    console.error("[admin save failed]", e);
-    res.status(500).json({ error: "save failed" });
+  } catch (err) {
+    console.error("[admin save failed]", err);
+    return res.status(500).json({
+      error: "save failed",
+      details: err?.message ?? null
+    });
   }
 };
