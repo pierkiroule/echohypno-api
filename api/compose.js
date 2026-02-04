@@ -55,6 +55,7 @@ function weightedPick(items) {
 module.exports = async function handler(req, res) {
   setCors(res);
 
+  /* ---------- Preflight ---------- */
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -64,6 +65,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    /* ---------- Body ---------- */
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body)
@@ -77,30 +79,37 @@ module.exports = async function handler(req, res) {
 
     const normalizedEmojis = emojis.map(normalizeEmoji);
 
-    /* ---------- Load data ---------- */
+    /* ---------- Load admin data ---------- */
     const [{ data: semantics }, { data: emojiMedia }] = await Promise.all([
       supabase.from("media_semantics").select("*").eq("enabled", true),
       supabase.from("emoji_media").select("*").eq("enabled", true)
     ]);
 
-    /* ---------- Build emoji index ---------- */
+    /* ---------- Build emoji → media weight index ---------- */
     const emojiIndex = {};
 
     for (const row of emojiMedia || []) {
-      if (!normalizedEmojis.includes(normalizeEmoji(row.emoji))) continue;
+      const emoji = normalizeEmoji(row.emoji);
+      if (!normalizedEmojis.includes(emoji)) continue;
+
       emojiIndex[row.media_path] =
         (emojiIndex[row.media_path] || 0) + (row.intensity || 1);
     }
 
-    /* ---------- Score media ---------- */
-    const scored = (semantics || []).map((m) => ({
-      ...m,
-      weight: (emojiIndex[m.path] || 1) + Math.random() * 0.5
-    }));
+    /* ---------- Scope media STRICTLY by admin ---------- */
+    const scoped = (semantics || []).filter(
+      (m) => emojiIndex[m.path] !== undefined
+    );
 
-    const usable = scored.length
-      ? scored
-      : (semantics || []).map((m) => ({ ...m, weight: 1 }));
+    const usable = scoped.length
+      ? scoped.map((m) => ({
+          ...m,
+          weight: emojiIndex[m.path] + Math.random() * 0.3
+        }))
+      : (semantics || []).map((m) => ({
+          ...m,
+          weight: 1
+        }));
 
     const pickCategory = (category) =>
       weightedPick(usable.filter((m) => m.category === category));
@@ -111,14 +120,15 @@ module.exports = async function handler(req, res) {
     const shader = pickCategory("shader");
     const text = pickCategory("text");
 
+    // Narration vocale fragmentée (échos)
     const voices = usable
       .filter((m) => m.category === "voice")
       .sort(() => Math.random() - 0.5)
-      .slice(0, 3);
+      .slice(0, 6); // ← narration étalée
 
-    /* ---------- Intensity liée aux emojis ---------- */
+    /* ---------- Intensity globale ---------- */
     const baseIntensity =
-      normalizedEmojis.length / 3 + Math.random() * 0.3;
+      normalizedEmojis.length / 3 + Math.random() * 0.25;
 
     /* ---------- Response ---------- */
     res.status(200).json({
@@ -131,7 +141,7 @@ module.exports = async function handler(req, res) {
         video: toPublicUrl(video?.path),
         shader: toPublicUrl(shader?.path),
         text: toPublicUrl(text?.path),
-        voices: voices.map((v) => toPublicUrl(v.path)).filter(Boolean)
+        voices: voices.map(v => toPublicUrl(v.path)).filter(Boolean)
       },
       oracle: {
         text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`
