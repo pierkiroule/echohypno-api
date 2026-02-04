@@ -14,19 +14,12 @@ function setCors(res) {
 module.exports = async function handler(req, res) {
   setCors(res);
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "POST only" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   try {
     const body =
-      typeof req.body === "string"
-        ? JSON.parse(req.body)
-        : req.body || {};
+      typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
     const { rows } = body;
 
@@ -34,29 +27,58 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "rows array required" });
     }
 
-    let updated = 0;
+    const debug = [];
 
     for (const r of rows) {
-      const { error, count } = await supabase
+      // 1️⃣ Vérifier que la ligne existe
+      const { data: existing, error: selectError } = await supabase
+        .from("emoji_media")
+        .select("*")
+        .eq("emoji", r.emoji)
+        .eq("media_path", r.media_path)
+        .eq("role", r.role);
+
+      if (selectError) {
+        debug.push({ step: "select_error", row: r, error: selectError });
+        continue;
+      }
+
+      if (!existing || existing.length === 0) {
+        debug.push({ step: "no_match", row: r });
+        continue;
+      }
+
+      // 2️⃣ Update réel
+      const { data: updated, error: updateError } = await supabase
         .from("emoji_media")
         .update({
           intensity: r.intensity,
           enabled: r.enabled,
         })
-        .eq("id", r.id);
+        .eq("emoji", r.emoji)
+        .eq("media_path", r.media_path)
+        .eq("role", r.role)
+        .select();
 
-      if (error) {
-        console.error("[save error]", error);
-        throw error;
+      if (updateError) {
+        debug.push({ step: "update_error", row: r, error: updateError });
+        continue;
       }
 
-      updated++;
+      debug.push({
+        step: "updated",
+        before: existing[0],
+        after: updated?.[0],
+      });
     }
 
-    return res.status(200).json({ ok: true, updated });
+    return res.status(200).json({
+      ok: true,
+      debug,
+    });
 
   } catch (e) {
     console.error("[admin save failed]", e);
-    return res.status(500).json({ error: "save failed" });
+    res.status(500).json({ error: "save failed", details: String(e) });
   }
 };
