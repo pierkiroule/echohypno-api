@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -25,10 +27,7 @@ export async function POST(req: Request) {
       .in("emoji", emojis);
 
     if (climateError || !climates?.length) {
-      return NextResponse.json(
-        { error: "No climate data" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No climate data" }, { status: 400 });
     }
 
     const scores: Record<string, number> = {};
@@ -36,8 +35,7 @@ export async function POST(req: Request) {
       scores[climate] = (scores[climate] || 0) + Number(weight);
     }
 
-    const climate = Object.entries(scores)
-      .sort((a, b) => b[1] - a[1])[0][0];
+    const climate = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
 
     const { data: assets } = await supabase
       .from("media_assets")
@@ -46,14 +44,11 @@ export async function POST(req: Request) {
       .eq("climate", climate);
 
     if (!assets?.length) {
-      return NextResponse.json(
-        { error: "No media for climate" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No media for climate" }, { status: 400 });
     }
 
-    const byCat = (c: string) =>
-      shuffle(assets.filter(a => a.category === c));
+    const byCat = (category: string) =>
+      shuffle(assets.filter((asset) => asset.category === category));
 
     return NextResponse.json({
       emojis,
@@ -63,18 +58,16 @@ export async function POST(req: Request) {
         video: byCat("video")[0]?.path ?? null,
         shader: byCat("shader")[0]?.path ?? null,
         text: byCat("text")[0]?.path ?? null,
-        voices: byCat("voice").slice(0, 3).map(v => v.path)
+        voices: byCat("voice")
+          .slice(0, 3)
+          .map((voice) => voice.path),
       },
       oracle: {
-        text: `${emojis.join(" · ")} — Une traversée se met en mouvement.`
-      }
+        text: `${emojis.join(" · ")} — Une traversée se met en mouvement.`,
+      },
     });
-
   } catch (err) {
     console.error("[compose]", err);
-    return NextResponse.json(
-      { error: "compose failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "compose failed" }, { status: 500 });
   }
 }
