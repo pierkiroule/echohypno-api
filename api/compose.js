@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 /* -------------------------------------------------- */
-/* HELPERS                                            */
+/* UTILS                                              */
 /* -------------------------------------------------- */
 
 const shuffle = <T>(arr: T[]) =>
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     }
 
     /* -------------------------------------------------- */
-    /* 1. CALCUL DU CLIMAT DOMINANT                        */
+    /* 1. CLIMAT DOMINANT (via emoji_climate_weights)     */
     /* -------------------------------------------------- */
 
     const { data: climates, error: climateErr } =
@@ -71,25 +71,23 @@ export default async function handler(req, res) {
         (climateScores[climate] || 0) + Number(weight);
     }
 
-    const climateEntry = Object.entries(climateScores)
+    const [climate] = Object.entries(climateScores)
       .sort((a, b) => b[1] - a[1])[0];
 
-    if (!climateEntry) {
+    if (!climate) {
       return res
         .status(400)
         .json({ error: "Unable to resolve climate" });
     }
 
-    const climate = climateEntry[0];
-
     /* -------------------------------------------------- */
-    /* 2. CHARGEMENT DES MÉDIAS DU CLIMAT                  */
+    /* 2. MÉDIAS DU CLIMAT                                */
     /* -------------------------------------------------- */
 
     const { data: assets, error: assetErr } =
       await supabase
         .from("media_assets")
-        .select("*")
+        .select("path, category")
         .eq("enabled", true)
         .eq("climate", climate);
 
@@ -99,67 +97,35 @@ export default async function handler(req, res) {
         .json({ error: "No media for climate" });
     }
 
-    const byCat = (cat: string) =>
-      shuffle(assets.filter(a => a.category === cat));
-
-    const music = byCat("music")[0] || null;
-    const videos = byCat("video").slice(0, 3);
-    const shader = byCat("shader")[0] || null;
-    const voices = byCat("voice").slice(0, 3);
-    const texts = byCat("text").slice(0, 3);
+    const pick = (cat: string, n = 1) =>
+      shuffle(assets.filter(a => a.category === cat))
+        .slice(0, n)
+        .map(a => a.path);
 
     /* -------------------------------------------------- */
-    /* 3. COMPOSITION DE LA TRAVERSÉE                      */
+    /* 3. FORMAT FRONT-COMPATIBLE                         */
     /* -------------------------------------------------- */
 
-    const duration =
-      typeof music?.duration === "number"
-        ? music.duration
-        : 180; // fallback 3 min
-
-    const scene = {
-      climate,
-      duration,
-
-      music: music && {
-        asset: music,
-        start: 0,
-        end: duration
-      },
-
-      visuals: {
-        shader,
-        videos: videos.map((v, i) => ({
-          asset: v,
-          start: (i / videos.length) * duration,
-          end: ((i + 1) / videos.length) * duration,
-          loop: true
-        }))
-      },
-
-      voices: voices.map(v => ({
-        asset: v,
-        at: Math.random() * duration
-      })),
-
-      texts: texts.map(t => ({
-        asset: t,
-        at: Math.random() * duration
-      }))
+    const media = {
+      music: pick("music", 1)[0] ?? null,
+      video: pick("video", 1)[0] ?? null,
+      shader: pick("shader", 1)[0] ?? null,
+      text: pick("text", 1)[0] ?? null,
+      voices: pick("voice", 3)
     };
 
     /* -------------------------------------------------- */
     /* RESPONSE                                           */
     /* -------------------------------------------------- */
 
-    res.status(200).json({
+    return res.status(200).json({
       emojis,
       climate,
-      scene
+      media
     });
 
   } catch (err) {
     console.error("[compose error]", err);
-    res.status(500).json({ error: "compose failed" });
+    return res.status(500).json({ error: "compose failed" });
   }
 }
