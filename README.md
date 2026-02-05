@@ -68,6 +68,7 @@ L’API renvoie les headers CORS publics (`Access-Control-Allow-Origin: *`) et g
 1. Importer ce repo dans Vercel.
 2. Définir `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`.
 3. Vérifier que **Vercel Authentication / Deployment Protection** est désactivée pour cet environnement afin de rendre l’API accessible publiquement.
+4. Dans **Project Settings → Node.js Version**, sélectionner `20.x` (requis par `@vercel/node@3.2.16`).
 
 ## Vérifications curl
 
