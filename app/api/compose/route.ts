@@ -72,8 +72,8 @@ export async function POST(req: Request) {
         voices: byCat("voice").slice(0, 3).map(v => v.path)
       },
       oracle: {
-        text: `${emojis.join(" · ")} — Une traversée se met en mouvement.`
-      }
+  text: `${emojis.join(" · ")}`
+}
     });
 
   } catch (err) {
