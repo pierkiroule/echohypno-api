@@ -14,7 +14,7 @@ vercel.json
 README.md
 ```
 
-- Runtime Vercel : `@vercel/node@3.2.16`
+- Runtime Vercel : `nodejs` (avec `framework: null`)
 - Endpoint public : `POST /api/compose`
 - Source de données : Supabase (`emoji_climate_weights`, `media_assets`)
 
