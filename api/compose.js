@@ -1,16 +1,6 @@
 const { createClient } = require("@supabase/supabase-js");
 
 /* -------------------------------------------------- */
-/* CORS                                               */
-/* -------------------------------------------------- */
-
-function setCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-
-/* -------------------------------------------------- */
 /* SUPABASE CLIENT                                    */
 /* -------------------------------------------------- */
 
@@ -22,28 +12,32 @@ const supabase = createClient(
 const SUPABASE_PUBLIC_BASE =
   `${process.env.SUPABASE_URL}/storage/v1/object/public/scenes-media/`;
 
-/* -------------------------------------------------- */
-/* UTILS                                              */
-/* -------------------------------------------------- */
-
-const normalizeEmoji = (e) =>
-  typeof e === "string"
-    ? e.trim().replace(/\uFE0F/g, "")
-    : "";
-
 const toPublicUrl = (path) => {
-  if (!path || typeof path !== "string") return null;
+  if (!path) return null;
   if (path.startsWith("http")) return path;
   return SUPABASE_PUBLIC_BASE + path.replace(/^\/+/, "");
 };
 
+/* -------------------------------------------------- */
+/* CORS                                               */
+/* -------------------------------------------------- */
+
+function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+/* -------------------------------------------------- */
+/* UTILS                                              */
+/* -------------------------------------------------- */
+
 function weightedPick(items) {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  const total = items.reduce((s, i) => s + (i.weight || 1), 0);
+  if (!items || items.length === 0) return null;
+  const total = items.reduce((s, i) => s + i.weight, 0);
   let r = Math.random() * total;
   for (const item of items) {
-    r -= item.weight || 1;
-    if (r <= 0) return item;
+    if ((r -= item.weight) <= 0) return item;
   }
   return items[items.length - 1];
 }
@@ -55,7 +49,6 @@ function weightedPick(items) {
 module.exports = async function handler(req, res) {
   setCors(res);
 
-  /* ---------- Preflight ---------- */
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -65,7 +58,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    /* ---------- Body ---------- */
     const body =
       typeof req.body === "string"
         ? JSON.parse(req.body)
@@ -77,109 +69,91 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "emojis required" });
     }
 
-    const normalizedEmojis = emojis.map(normalizeEmoji);
+    /* -------------------------------------------------- */
+    /* LOAD DATA                                          */
+    /* -------------------------------------------------- */
 
-    /* ---------- Load admin data ---------- */
     const [{ data: semantics }, { data: emojiMedia }] = await Promise.all([
-      supabase.from("media_semantics").select("*").eq("enabled", true),
-      supabase.from("emoji_media").select("*").eq("enabled", true)
+      supabase
+        .from("media_semantics")
+        .select("*")
+        .eq("enabled", true),
+
+      supabase
+        .from("emoji_media")
+        .select("*")
+        .eq("enabled", true)
+        .in("emoji", emojis),
     ]);
 
-    /* ---------- Build emoji → media weight index ---------- */
+    /* -------------------------------------------------- */
+    /* BUILD EMOJI → MEDIA WEIGHTS                        */
+    /* -------------------------------------------------- */
+
     const emojiIndex = {};
 
     for (const row of emojiMedia || []) {
-      const emoji = normalizeEmoji(row.emoji);
-      if (!normalizedEmojis.includes(emoji)) continue;
-
-      emojiIndex[row.media_path] =
-        (emojiIndex[row.media_path] || 0) + (row.intensity || 1);
+      if (!emojiIndex[row.media_path]) {
+        emojiIndex[row.media_path] = 0;
+      }
+      emojiIndex[row.media_path] += row.intensity || 1;
     }
 
-    /* ---------- Scope media STRICTLY by admin ---------- */
-    const scoped = (semantics || []).filter(
-      (m) => emojiIndex[m.path] !== undefined
-    );
+    /* -------------------------------------------------- */
+    /* SCORE MEDIA (IMPORTANT FIX HERE)                   */
+    /* -------------------------------------------------- */
 
-    const usable = scoped.length
-      ? scoped.map((m) => ({
-          ...m,
-          weight: emojiIndex[m.path] + Math.random() * 0.3
-        }))
-      : (semantics || []).map((m) => ({
-          ...m,
-          weight: 1
-        }));
+    const scored = (semantics || []).map((m) => {
+      const baseWeight = emojiIndex[m.path];
+
+      return {
+        ...m,
+        // 👇 clé de la correction :
+        // - média sans résonance => poids minimal (1)
+        // - média avec résonance => favorisé
+        weight: (baseWeight ?? 1) + Math.random(),
+      };
+    });
 
     const pickCategory = (category) =>
-      weightedPick(usable.filter((m) => m.category === category));
+      weightedPick(scored.filter((m) => m.category === category));
 
-    /* ---------- Picks ---------- */
+    /* -------------------------------------------------- */
+    /* PICKS                                              */
+    /* -------------------------------------------------- */
+
     const music = pickCategory("music");
     const video = pickCategory("video");
     const shader = pickCategory("shader");
     const text = pickCategory("text");
-
-    // Narration vocale fragmentée (échos)
-    const voices = usable
+    const voices = scored
       .filter((m) => m.category === "voice")
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 6);
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 3);
 
-    /* ---------- Intensity globale ---------- */
-    const baseIntensity =
-      normalizedEmojis.length / 3 + Math.random() * 0.25;
+    /* -------------------------------------------------- */
+    /* RESPONSE                                           */
+    /* -------------------------------------------------- */
 
-    /* ---------- TRACE COLLECTIVE (light) ---------- */
-    for (const e of normalizedEmojis) {
-      await supabase
-        .from("emoji_collective_stats")
-        .upsert(
-          {
-            emoji: e,
-            occurrences: 1,
-            updated_at: new Date().toISOString()
-          },
-          { onConflict: "emoji" }
-        );
-    }
-
-    for (let i = 0; i < normalizedEmojis.length; i++) {
-      for (let j = i + 1; j < normalizedEmojis.length; j++) {
-        await supabase
-          .from("emoji_cooccurrences")
-          .upsert(
-            {
-              emoji_source: normalizedEmojis[i],
-              emoji_target: normalizedEmojis[j],
-              occurrences: 1,
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: "emoji_source,emoji_target" }
-          );
-      }
-    }
-
-    /* ---------- Response ---------- */
     res.status(200).json({
       id: `scene-${Math.random().toString(16).slice(2)}`,
       seed: Date.now(),
       emojis,
-      intensity: Math.min(1, baseIntensity),
+      intensity: 1,
       media: {
         music: toPublicUrl(music?.path),
         video: toPublicUrl(video?.path),
         shader: toPublicUrl(shader?.path),
         text: toPublicUrl(text?.path),
-        voices: voices.map(v => toPublicUrl(v.path)).filter(Boolean)
+        voices: voices.map((v) => toPublicUrl(v.path)),
       },
       oracle: {
-        text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`
-      }
+        text: `${emojis.join(" ")} — Ce qui résonne cherche un passage.`,
+      },
     });
 
-  } catch (err) {
-    console.error("[compose error]", err);
+  } catch (e) {
+    console.error("[compose error]", e);
     res.status(500).json({ error: "compose failed" });
   }
 };
