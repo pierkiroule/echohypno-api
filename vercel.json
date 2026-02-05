@@ -1,8 +1,8 @@
 {
   "framework": null,
   "functions": {
-    "api/*.ts": {
-      "runtime": "nodejs"
+    "api/**/*.ts": {
+      "runtime": "nodejs@18.x"
     }
   }
 }
