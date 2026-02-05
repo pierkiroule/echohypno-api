@@ -1,20 +1,11 @@
 {
   "name": "echohypno-api",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
+  "type": "module",
   "dependencies": {
-    "next": "14.2.35",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "@supabase/supabase-js": "^2.39.7"
+    "@supabase/supabase-js": "^2.39.0"
   },
-  "devDependencies": {
-    "typescript": "^5.3.3",
-    "@types/react": "^18.2.37",
-    "@types/node": "^20.10.5"
+  "engines": {
+    "node": "20.x"
   }
 }
