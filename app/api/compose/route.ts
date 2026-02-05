@@ -1,16 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !serviceKey) {
+  throw new Error("Supabase env vars missing");
+}
+
+const supabase = createClient(supabaseUrl, serviceKey);
 
 const shuffle = <T,>(arr: T[]) => [...arr].sort(() => 0.5 - Math.random());
 
 export async function POST(req: Request) {
   try {
-    const { emojis } = await req.json();
+    const body = await req.json();
+    const { emojis } = body;
 
     if (!Array.isArray(emojis) || emojis.length !== 3) {
       return NextResponse.json(
@@ -19,6 +24,7 @@ export async function POST(req: Request) {
       );
     }
 
+    /* 1. CLIMAT */
     const { data: climates, error: climateError } = await supabase
       .from("emoji_climate_weights")
       .select("climate, weight")
@@ -32,13 +38,13 @@ export async function POST(req: Request) {
     }
 
     const scores: Record<string, number> = {};
-    for (const { climate, weight } of climates) {
-      scores[climate] = (scores[climate] || 0) + Number(weight);
-    }
+    climates.forEach(c => {
+      scores[c.climate] = (scores[c.climate] || 0) + Number(c.weight);
+    });
 
-    const climate = Object.entries(scores)
-      .sort((a, b) => b[1] - a[1])[0][0];
+    const climate = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
 
+    /* 2. MÉDIAS */
     const { data: assets } = await supabase
       .from("media_assets")
       .select("path, category")
@@ -71,7 +77,7 @@ export async function POST(req: Request) {
     });
 
   } catch (err) {
-    console.error("[compose]", err);
+    console.error("[compose error]", err);
     return NextResponse.json(
       { error: "compose failed" },
       { status: 500 }
